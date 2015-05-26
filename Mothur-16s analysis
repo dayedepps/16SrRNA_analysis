@@ -1,0 +1,944 @@
+处理时间：2015年2月6日
+样品：48个正常的人，17个病人
+其中M055和M844不处理
+
+因为fasta序列名字太长，所以删掉一些
+wc stability.contigs.groups
+10291237  20582474 524066411 stability.contigs.groups
+sam@sam-Precision-WorkStation-T7500[fastq] head -n 1 stability.contigs.groups 
+M01519_56_000000000-ABNR1_1_1101_10006_27420	M008
+sam@sam-Precision-WorkStation-T7500[fastq] tail -n 1 stability.contigs.groups
+M01519_40_000000000-AA6DB_1_2114_9989_13246	NMV-0806-9
+sam@sam-Precision-WorkStation-T7500[fastq] grep 'M01519_' stability.contigs.groups|wc
+10291237 20582474 524066411
+sam@sam-Precision-WorkStation-T7500[fastq] grep 'M01519_56' stability.contigs.groups|wc
+6361256 12722512 320151739
+sam@sam-Precision-WorkStation-T7500[fastq] grep '000000000-' stability.contigs.groups|wc
+10291237 20582474 524066411
+
+#sed 's/01519_56_//g' bb.filter.unique.precluster.pick.pick.fasta.3.dist |sed 's/000000000-//g'>Mbb.filter.unique.precluster.pick.pick.fasta.3.dist;
+rm -f bb.filter.unique.precluster.pick.pick.fasta.3.dist
+开始替换名字
+cd /sam/meta/changdao/fastq;
+sed 's/01519_//g' stability.contigs.good.groups|sed 's/000000000-//g'>stability.contigs.good.groups2
+
+#grep '01519' bb.filter.unique.precluster.pick.pick.fasta.0.dist
+
+ls * |grep "bb.filter.unique.precluster.pick.pick.fasta"|grep 'dist'|perl -lne's/bb.filter.unique.precluster.pick.pick.fasta.//g;s/.dist//g;print' | sort -n|uniq | perl -lne 'print"sed 's/01519_//g' bb.filter.unique.precluster.pick.pick.fasta.${_}.dist |sed 's/000000000-//g'>./dist/bb.filter.unique.precluster.pick.pick.fasta.${_}.dist;rm bb.filter.unique.precluster.pick.pick.fasta.${_}.dist;"'>aa.sh;
+sed "s/sed /sed '/g" aa.sh |sed "s/\/g/\/g'/g" >ab.sh
+​nohup sh ab.sh &;
+
+mv bb.filter.unique.precluster.pick.pick.fasta.2.dist ./dist1
+mv bb.filter.unique.precluster.pick.pick.fasta.4.dist ./dist2
+
+
+
+因为数据量有点大，所以我是分开来处理的 20个样品一组，分成了3组：fastq,fastq2,fastq3
+其中M055和M844不处理
+1，解压缩
+
+cd /sam/meta/changdao/fastq1;
+gzip -d *.gz;
+cd /sam/meta/changdao/fastq2;
+gzip -d *.gz;
+cd /sam/meta/changdao/fastq3;
+gzip -d *.gz;
+
+2,过滤
+这个公司给的fastq文件现在确定是不含有引物序列，不含有barcode，但是否过滤了还不知道，所以用trimmomatic来弄一下 
+先用这个文件试一下/sam/meta/changdao/M008_R1.fasta
+2.1先知道测序为phred64是32
+cd /sam/meta/changdao/abc;
+perl /sam/usefulscript/fastq_phred_decide.pl M008_R1.fasta
+#####Negative value appear 8322 times in 225584 base quality score, it should be Phred33
+
+2.2 过滤
+cd /sam/meta/changdao/fastq;
+ls * |grep "fasta"|perl -lne 's/_R1.fasta//g;s/_R2.fasta//g;print' | sort |uniq | perl -lne 'print "java -jar /sam/trimmomatic/trimmomatic-0.32.jar PE -threads 12 -phred33 -trimlog ${_}_logfile ${_}_R1.fasta ${_}_R2.fasta ${_}_output_forward_paired ${_}_output_forward_unpaired ${_}_output_reverse_paired ${_}_output_reverse_unpaired LEADING:25 TRAILING:25 SLIDINGWINDOW:4:25 MINLEN:150"'>work.sh;
+nohup sh work.sh ; 
+#去除两端质量小于25的碱基，去掉4个碱基平均质量小于25的碱基序列，最小长度150
+###nohup.out为输出结果
+
+perl -ne 'print "$1\t" if /-trimlog (.*)_logfile/;print "$1\t$2\t$3\n" if /Pairs: (\d+) Both Surviving: (\d+) \((\d+.\d+%)\)/' nohup.out>1_trim_trimmomatic;
+mkdir output;
+mv 1_trim_trimmomatic ./output
+####mv 1_trim_trimmomatic ./output 反应过滤后的情况，每个样品大概有88%的序列被保留。
+
+3 拼接
+先做好stability.files文件
+ls * |grep "paired"|grep -v "unpaired"|perl -lne 's/_output_forward_paired//g;s/_output_reverse_paired//g;print' | sort |uniq|perl -lne 'print "${_} ${_}_output_forward_paired ${_}_output_reverse_paired"'>stability.files
+mothur;
+mothur > make.contigs(file=stability.files,processors=12)
+
+Output File Names: 
+stability.trim.contigs.fasta
+stability.contigs.report
+stability.scrap.contigs.fasta
+stability.contigs.groups
+
+
+mothur > summary.seqs(fasta=stability.trim.contigs.fasta)
+		Start	End	NBases	Ambigs	Polymer	NumSeqs
+Minimum:	1	163	163	0	3	1
+2.5%-tile:	1	291	291	0	4	257281
+25%-tile:	1	424	424	0	5	2572810
+Median: 	1	436	436	0	5	5145619
+75%-tile:	1	440	440	6	5	7718428
+97.5%-tile:	1	448	448	35	6	10033957
+Maximum:	1	453	452	70	226	10291237
+Mean:	1	418.97	418.969	4.80052	4.91085
+# of Seqs:	10291237
+
+Output File Names: 
+stability.trim.contigs.summary
+
+4,根据长度来提取拼接后的序列，长度的取值范围参考上一步的summary，同时maxambig=0
+mothur > screen.seqs(fasta=stability.trim.contigs.fasta,group=stability.contigs.groups,summary=stability.trim.contigs.summary,maxambig=0,maxlength=480,minlength=400)
+
+Output File Names: 
+stability.trim.contigs.good.summary
+stability.trim.contigs.good.fasta
+stability.trim.contigs.bad.accnos
+stability.contigs.good.groups
+It took 138 secs to screen 10291237 sequences.
+
+mothur > summary.seqs(fasta=stability.trim.contigs.good.fasta)
+		Start	End	NBases	Ambigs	Polymer	NumSeqs
+Minimum:	1	400	400	0	3	1
+2.5%-tile:	1	432	432	0	4	135964
+25%-tile:	1	437	437	0	5	1359633
+Median: 	1	439	439	0	5	2719265
+75%-tile:	1	441	441	0	5	4078897
+97.5%-tile:	1	449	449	0	6	5302566
+Maximum:	1	453	452	0	226	5438529
+Mean:	1	438.833	438.831	0	4.99773
+# of Seqs:	5438529
+Output File Names: 
+stability.trim.contigs.good.summary
+###可以看出来一半的序列被丢掉了
+
+5，对序列进行unique
+mothur > unique.seqs(fasta=stability.trim.contigs.good.fasta)
+
+5438529	3953375
+Output File Names: 
+stability.trim.contigs.good.names
+stability.trim.contigs.good.unique.fasta
+
+mothur > count.seqs(name=stability.trim.contigs.good.names,group=stability.contigs.good.groups)
+Output File Names: 
+stability.trim.contigs.good.count_table
+
+6,跟16s rRNA核心数据库比对
+mothur > align.seqs(fasta=stability.trim.contigs.good.unique.fasta, reference=/sam/blast/db/silva/silva.seed_v119.align,processors=12)
+###更完整:reference=/sam/blast/db/silva/silva.nr_v119.align，
+Output File Names: 
+stability.trim.contigs.good.unique.align   
+stability.trim.contigs.good.unique.align.report
+stability.trim.contigs.good.unique.flip.accnos
+
+mothur > summary.seqs(fasta=stability.trim.contigs.good.unique.align,count=stability.trim.contigs.good.count_table,processors=12)
+## stability.trim.contigs.good.unique.align 这个文件197G，能分析吗？？
+
+Using 12 processors.
+
+		Start	End	NBases	Ambigs	Polymer	NumSeqs
+Minimum:	0	0	0	0	1	1
+2.5%-tile:	2077	15641	432	0	4	135964
+25%-tile:	6387	25300	437	0	5	1359633
+Median: 	6389	25318	439	0	5	2719265
+75%-tile:	6395	25319	441	0	5	4078897
+97.5%-tile:	15649	32542	449	0	6	5302566
+Maximum:	43116	43116	452	0	226	5438529
+Mean:	6540.42	25184.7	438.827	0	4.9977
+# of unique seqs:	3953375
+total # of seqs:	5438529
+
+Output File Names: 
+stability.trim.contigs.good.unique.summary
+
+wc stability.trim.contigs.good.unique.summary
+3953376  27673632 259158230 stability.trim.contigs.good.unique.summary
+
+###根据之前的经验，对6个样品处理，序列的分布如下：
+第一部分：序列条数为23417，start—end分布为（1796—2084）--（15641—15875）
+第二部分：序列数为205944，start—end分布为（6387--6402）--（25298--25319）
+第三部分：序列数为36873，start—end分布为（10369--15660）--（32547--32814）
+当然这批数据的主体部分还是第二部分的数据（205944/267775=77%）
+
+7，对比对后序列抽提（根据start-end位置）
+所以，我只需要提取主体的部分
+mothur > screen.seqs(fasta=stability.trim.contigs.good.unique.align, count=stability.trim.contigs.good.count_table, summary=stability.trim.contigs.good.unique.summary, start=10000,end=20000, maxhomop=8,processors=12)
+Output File Names: 
+stability.trim.contigs.good.unique.good.summary
+stability.trim.contigs.good.unique.good.align
+stability.trim.contigs.good.unique.bad.accnos
+stability.trim.contigs.good.good.count_table
+It took 4076 secs to screen 3953375 sequences.
+
+mothur > summary.seqs(fasta=current, count=current)
+###mothur > summary.seqs(fasta=stability.trim.contigs.good.unique.good.align,count=stability.trim.contigs.good.good.count_table,processors=12)
+		Start	End	NBases	Ambigs	Polymer	NumSeqs
+Minimum:	6114	22061	400	0	3	1
+2.5%-tile:	6387	25298	433	0	4	126823
+25%-tile:	6389	25300	437	0	5	1268226
+Median: 	6389	25318	438	0	5	2536451
+75%-tile:	6395	25319	441	0	5	3804676
+97.5%-tile:	6402	25319	445	0	6	4946078
+Maximum:	8418	25513	451	0	8	5072900
+Mean:	6394.8	25306.4	438.554	0	5.0041
+# of unique seqs:	3664965
+total # of seqs:	5072900
+Output File Names: 
+stability.trim.contigs.good.unique.good.summary
+
+mothur >screen.seqs(fasta=stability.trim.contigs.good.unique.good.align,count=stability.trim.contigs.good.good.count_table, summary=stability.trim.contigs.good.unique.good.summary, start=6402,end=25298, maxhomop=12,processors=12)
+
+Output File Names: 
+stability.trim.contigs.good.unique.good.good.summary
+stability.trim.contigs.good.unique.good.good.align
+stability.trim.contigs.good.unique.good.bad.accnos
+stability.trim.contigs.good.good.good.count_table
+It took 3778 secs to screen 3664965 sequences.
+
+mothur > summary.seqs(fasta=current, count=current)
+		Start	End	NBases	Ambigs	Polymer	NumSeqs
+Minimum:	6114	25298	400	0	3	1
+2.5%-tile:	6387	25298	433	0	4	123573
+25%-tile:	6389	25300	437	0	5	1235728
+Median: 	6389	25318	438	0	5	2471456
+75%-tile:	6395	25319	441	0	5	3707184
+97.5%-tile:	6402	25319	445	0	6	4819339
+Maximum:	6402	25513	451	0	8	4942911
+Mean:	6392.48	25309.5	438.723	0	5.0061
+# of unique seqs:	3539691
+total # of seqs:	4942911
+
+Output File Names: 
+stability.trim.contigs.good.unique.good.good.summary
+
+8，为了后续简单，对名字重新命名
+##注意粘贴命令过来改名字
+mothur > system(mv stability.trim.contigs.good.unique.good.good.summary bb.summary)
+mothur > system(mv stability.trim.contigs.good.unique.good.good.align bb.align)
+mothur > system(mv stability.trim.contigs.good.unique.good.bad.accnos bb.accnos)
+mothur > system(mv stability.trim.contigs.good.good.good.count_table bb.count_table)
+
+(发现内存不够，又删掉了bb.align)
+9，去除比对后的序列的gaps
+mothur > filter.seqs(fasta=bb.align, vertical=T, trump=.)
+Length of filtered alignment: 876
+Number of columns removed: 49124
+Length of the original alignment: 50000
+Number of sequences used to construct filter: 3539691
+
+Output File Names: 
+bb.filter
+bb.filter.fasta
+sam@sam-Precision-WorkStation-T7500[fastq] grep '>' bb.filter.fasta|wc  [12:39AM]
+3539691 3539691 161101425
+
+10,对序列再次unique
+mothur > unique.seqs(fasta=bb.filter.fasta, count=bb.count_table);
+3539691	2376780
+Output File Names: 
+bb.filter.count_table
+bb.filter.unique.fasta
+
+sam@sam-Precision-WorkStation-T7500[fastq] grep '>' bb.filter.unique.fasta|wc
+2376780 2376780 108173306
+
+11,对序列容许2个碱基的错误情况下，继续聚类
+mothur > pre.cluster(fasta=bb.filter.unique.fasta, count=bb.filter.count_table, diffs=2)
+
+It took 3922 secs to run pre.cluster.
+Output File Names: 
+bb.filter.unique.precluster.fasta
+bb.filter.unique.precluster.count_table
+
+sam@sam-Precision-WorkStation-T7500[fastq] grep '>' bb.filter.unique.precluster.fasta|wc
+1176546 1176546 53545504
+
+
+12，去除嵌合体
+mothur > chimera.uchime(fasta=bb.filter.unique.precluster.fasta, count=bb.filter.unique.precluster.count_table, dereplicate=t)
+
+It took 8485 secs to check 30127 sequences from group M042.(一个样品跑的时间，70个样品，我花了一天时间)
+
+Output File Names: 
+bb.filter.unique.precluster.uchime.pick.count_table
+bb.filter.unique.precluster.uchime.chimeras
+bb.filter.unique.precluster.uchime.accnos
+
+mothur > remove.seqs(fasta=bb.filter.unique.precluster.fasta, accnos=bb.filter.unique.precluster.uchime.accnos)
+
+Removed 49752 sequences from your fasta file.
+Output File Names: 
+bb.filter.unique.precluster.pick.fasta
+
+sam@sam-Precision-WorkStation-T7500[fastq] grep '>' bb.filter.unique.precluster.pick.fasta|wc
+1126794 1126794 51281229
+
+
+
+13，比对，确定序列门水平上分类信息
+mothur > classify.seqs(fasta=bb.filter.unique.precluster.pick.fasta,count=bb.filter.unique.precluster.uchime.pick.count_table, reference=/sam/blast/db/silva/silva.nr_v119.align,taxonomy=/sam/blast/db/silva/silva.nr_v119.tax, cutoff=80)
+###更小的数据库reference=/sam/blast/db/silva/trainset9_032012.pds.fasta, taxonomy=/sam/blast/db/silva/trainset9_032012.pds.tax,
+It took 7732 secs to classify 1126794 sequences.
+It took 49 secs to create the summary file for 1126794 sequences.
+Output File Names: 
+bb.filter.unique.precluster.pick.nr_v119.wang.taxonomy
+bb.filter.unique.precluster.pick.nr_v119.wang.tax.summary
+
+14，去掉序列序列分类地位为Chloroplast-Mitochondria-unknown-Eukaryota的序列
+mothur > remove.lineage(fasta=bb.filter.unique.precluster.pick.fasta, count=bb.filter.unique.precluster.uchime.pick.count_table, taxonomy=bb.filter.unique.precluster.pick.nr_v119.wang.taxonomy, taxon=Chloroplast-Mitochondria-unknown-Eukaryota);
+
+Output File Names: 
+bb.filter.unique.precluster.pick.nr_v119.wang.pick.taxonomy
+bb.filter.unique.precluster.pick.pick.fasta
+bb.filter.unique.precluster.uchime.pick.pick.count_table
+
+sam@sam-Precision-WorkStation-T7500[fastq] grep -v '>' bb.filter.unique.precluster.pick.pick.fasta|wc 
+1126716 1126716 988129932
+
+sam@sam-Precision-WorkStation-T7500[fastq] grep -v '>' bb.filter.unique.precluster.pick.pick.fasta|wc 
+1126716 1126716 988129932
+sam@sam-Precision-WorkStation-T7500[fastq] grep '>' bb.filter.unique.precluster.pick.pick.fasta|wc 
+1126716 1126716 51277677
+sam@sam-Precision-WorkStation-T7500[fastq] wc bb.filter.unique.precluster.pick.nr_v119.wang.pick.taxonomy
+  1126716   2253432 168915184 bb.filter.unique.precluster.pick.nr_v119.wang.pick.taxonomy
+
+15,进行OTU聚类
+##mothur > cluster.split(fasta=bb.filter.unique.precluster.pick.pick.fasta, count=bb.filter.unique.precluster.uchime.pick.pick.count_table,taxonomy=bb.filter.unique.precluster.pick.nr_v119.wang.pick.taxonomy,splitmethod=classify, taxlevel=4, cutoff=0.15)
+##这一步想当耗硬盘，最后没有跑完1G的序列，变成了5T，跑不动了。
+
+##mothur > cluster.split(fasta=bb.filter.unique.precluster.pick.pick.fasta, count=bb.filter.unique.precluster.uchime.pick.pick.count_table,taxonomy=bb.filter.unique.precluster.pick.nr_v119.wang.pick.taxonomy,splitmethod=classify, taxlevel=4, cutoff=0.15,cluster=f,processors=8)
+##这一步想当耗硬盘，最后没有跑完1G的序列，变成了5T，跑不动了。用下面一个命令，在门水平上来分类。
+##rm *temp
+
+###mothur > cluster.split(fasta=bb.filter.unique.precluster.pick.pick.fasta, count=bb.filter.unique.precluster.uchime.pick.pick.count_table,taxonomy=bb.filter.unique.precluster.pick.nr_v119.wang.pick.taxonomy,splitmethod=classify, taxlevel=5,cutoff=0.10,cluster=f,processors=12)
+#2015/3/4/15:26，终止于2015/3/6/8:48，因为硬盘不够
+
+####mothur > cluster.split(fasta=bb.filter.unique.precluster.pick.pick.fasta, count=bb.filter.unique.precluster.uchime.pick.pick.count_table,taxonomy=bb.filter.unique.precluster.pick.nr_v119.wang.pick.taxonomy,splitmethod=classify, taxlevel=5,cutoff=0.10,cluster=f,processors=12)
+#2015/3/6/10:51，终止于2015/3/9/10:51,因为断电
+
+#mothur > cluster.split(fasta=bb.filter.unique.precluster.pick.pick.fasta, count=bb.filter.unique.precluster.uchime.pick.pick.count_table,taxonomy=bb.filter.unique.precluster.pick.nr_v119.wang.pick.taxonomy,splitmethod=classify, taxlevel=5,cutoff=0.08,cluster=f,processors=12)
+#2015/3/9/23:21，终止于,2015/3/14/10:00跑完,产生了10T的数据,后面没法运行了
+
+
+#mothur >dist.seqs(fasta=final.fasta,cutoff=0.05,processors=12)
+
+用qiime来跑聚类这一步
+sam@sam-Precision-WorkStation-T7500[send] head -n 3 bb.filter.unique.precluster.pick.pick.fasta
+>M01519_56_000000000-ABNR1_1_1101_26846_9215
+G-G-G-A-G-GC-A-GC-A-G-T-G-G-G-G-A-A--TA-TTGC-A-C-AA-T-G-G--GG--GA-A-A-C-CC-TG-A-TGCAGC-GACGCCGCGT-G-G-A-G--GA-A-G-A-A--G-G-TC----------TT-CG---------------GA-TTG-T-A--AA-C-T-CC-----TG-TT-G-T--T-GGG----G--A-A--G---A------------------------T-----------AA-------------------------------T-G-A-C-G-----G-T-A-C-CC---A-A-C-A-A-G---G--AA--GT-G--AC-G--GC-TAA-C--T-A-C-G-T-G-CCA-G-C--A-GC-CG-C----GG--TA-AA--AC-GT-AG-GTC--ACA-A-G-C-GT---T-GT-C-CGG-AA-TT-A-C-T--GG-GT-GT--A---AA-GG-GA-GC-----G-CA-G-G-C-G--G--G-AA-G-A-C-AAG-TT-G-G-A-A-G--TG--A-AA-TC-T-A-TG-G-G--CT-C-AA-C-C-C-A-T-A-A-A-C-T-G-C-T-T-T-C--AA-A-ACT-G-T--TT--T-T-C-T-T-GA-GT-A-G-TG----CA-G-A--G-G-T-A--GG-C----GG-A-ATT-C-C-C-G-GTGT-A-GCGGT-G-G-AA-TGCGTAGATA-TC--G-GG-A-G-G-A-ACA-CC-AG-T-GGC-GAA-G--G-C--G-G--C-C-T-A---CTG-G--GC-A-C-C-A-A-CT-GA-CG-CT-G-A-GG-CT-CG-AAA-G-T-G-TG-GG-T-AG-C-AAA-CA--GG-AT-TA-G-ATA--C-C-C-T-G-GTA-G
+>M01519_56_000000000-ABNR1_1_1101_17904_17467
+去掉空格-，序列名字也给换了
+sed 's/-//g' bb.filter.unique.precluster.pick.pick.fasta>good.fasta
+/usr/lib/qiime/bin/pick_otus.py -i good.fasta -m cdhit -o cdhit_picked_otus/ -n 100
+生成good_otus.txt
+
+sed 's/01519_//g' bb.filter.unique.precluster.uchime.pick.pick.count_table|sed 's/000000000-//g'>aaa.count
+awk '{print $1}' aaa.count>ab.count
+sed '1d' ab.count>ad.count
+sam@sam-Precision-WorkStation-T7500[cdhit_picked_otus] wc ad.count                             [11:13PM]
+ 1126716  1126716 32123505 ad.count
+sed '1i\unique\t1126716 ' ad.count>ae.count	'
+perl onesingle.pl ae.count ah.count  #变成一行
+
+sed 's/01519_//g' good_otus.txt|sed 's/000000000//g'>aaa.dist
+perl no_tab.pl aaa.dist ae.dist  #去掉末尾的很多个tab
+awk '{for(i=2;i<=NF;i++) if(i!=NF){printf $i" "}else{print $i} }' ae.dist>ac.dist
+sed 's/ /,/g' ac.dist>ab.dist
+sam@sam-Precision-WorkStation-T7500[cdhit_picked_otus] wc ab.dist                                                         [ 8:33AM]
+    3231  1085105 30
+sed '1i\0.03\t3231' ab.dist>ad.dist	'
+perl onesingle.pl ad.dist ah.dist  #变成一行
+
+cat ah.count ah.dist>aa.list
+
+
+
+mothur > make.shared(list=aa.list, count=aaa.count, label=0.03)
+0.03
+Output File Names: 
+aa.shared
+
+sed 's/01519_//g' bb.filter.unique.precluster.pick.nr_v119.wang.pick.taxonomy|sed 's/000000000-//g'>aa.taxonomy
+mothur>classify.otu(list=aa.list, count=aaa.count, taxonomy=aa.taxonomy, label=0.03)
+
+Output File Names: 
+aa.0.03.cons.taxonomy
+aa.0.03.cons.tax.summary
+
+mothur > summary.single(shared=aa.shared, calc=sobs-ace-chao-shannon-coverage);
+Output File Names: 
+aa.groups.summary
+
+##get.oturep(column=ad.dist, count=aa.count,  fasta=good.fasta, list=aa.list,label=0.03)
+
+sed 's/01519_//g' good.fasta |sed 's/000000000//g'>better.fasta
+
+提取rep.fasta
+aaa.dist 用excel打开，删掉0，第1列末尾加上otu个数  #qiime与mothur跑出来的otu编号有差别，qiime从0开始，mothur从1开始
+/usr/lib/qiime/bin/pick_rep_set.py -i aaa.dist -f better.fasta -o rep.fna
+
+
+#####网页版的太难看了，列没有对齐，不建议用
+/usr/lib/qiime/bin/pick_rep_set.py -i aaa.dist -f better.fasta -o rep.fna
+将rep.fna他到入到rdp网页版http://rdp.cme.msu.edu/classifier/classifier.jsp，下载后，
+mv /home/sam/Downloads/allrank_rep.fna_classified.txt /sam/meta/changdao/fastq/send/cdhit_picked_otus
+
+sed '1,7d' allrank_rep.fna_classified.txt |sed 's/%//g' |sed 's/"//g' >abc;  #删掉allrank_rep.fna_classified.txt前几行
+sort -t ',' -k 1 -n abc >abe   #跟据abd第一列进行拍序
+perl /sam/usefulscript/rdpformat2.pl abe abd;
+
+sed 's/Actinobacteridae\t100\t//g' abd>abh
+sed 's/Actinobacteria\t100\tActinobacteria\t100/Actinobacteria\t100/g' abh >abg
+#####3
+
+
+sed 's/;/\t/g' aa.0.03.cons.taxonomy|sed 's/(/\t/g'|sed 's/)//g' >taxonomy
+sed 's/\t/;/g' taxonomy >abb
+sed 's/;;/;/g' abb>abbb
+
+perl /sam/usefulscript/rdpformat3.pl taxonomy abd;
+
+
+
+
+用R来分析
+setwd("/sam/meta/changdao/fastq/send/cdhit_picked_otus");
+otu_rank<-read.table("abd",sep="\t",header=T)
+
+rdp_rank<-otu_rank[,c(1,2,3,5,7,9,11,13)]
+colnames(rdp_rank)<-c("Group","size","kindom","phylum","class","order","family","genus")
+
+awk '{for(i=2;i<=NF;i++) if(i!=NF){printf $i" "}else{print $i} }' aa.shared>aaa.shared
+
+otu<-read.table("aaa.shared",sep=" ",header=F)
+otu2<-t(otu);
+colnames(otu2)<-otu2[1,]
+otu3<-otu2[c(-1,-2),]
+row.names(otu3)<-otu3[,1]
+
+otu_rank2<-merge(otu3,rdp_rank,by="Group")
+
+setwd('/sam/meta/changdao/result')
+write.table(otu_rank2,file="otu.txt",quote=F,row.names=F,col.names=T,sep="\t");
+
+otu_rank2<-read.table("otu.txt",sep="\t",header=T)
+分古菌和细菌
+arc<-subset(otu_rank2,kindom=="Archaea");
+bac<-subset(otu_rank2,kindom=="Bacteria");
+
+nn<-63;
+arc_total<-arc[,2:(nn+1)];
+arc_sum<-apply(arc_total,2,sum);
+arc_sum;
+
+bac_total<-bac[,2:(nn+1)];
+bac_sum<-apply(bac_total,2,sum);
+bac_sum;
+
+  M008        M009        M010        M011        M012        M013        M014        M015        M016 
+     160676      100168       85008       79884       64594       94201      168214      207821      170630 
+       M017        M018        M019        M020        M021        M022        M023        M024        M025 
+     132367      117715       44455       12386       73175       66787       47194       80178       49773 
+       M026        M027        M028        M029        M030        M031        M032        M033        M034 
+      35829       64099       39164       48420       59494       94928       99116       84408       12484 
+       M035        M036        M037        M038        M039        M040        M041        M042        M043 
+      30830      117471      239452      113312      182628      178863       91581      115625       61574 
+       M045        M046        M047        M048        M049        M050        M051        M052        M053 
+      32727       26072       63506       72518       54809       60037       62584       57365       42161 
+       M054  NMV.0806.1 NMV.0806.10 NMV.0806.11 NMV.0806.12 NMV.0806.13 NMV.0806.14 NMV.0806.15 NMV.0806.16 
+      61566       12187       46039       60870       72852       41009       59735       51922      107815 
+NMV.0806.17  NMV.0806.2  NMV.0806.3  NMV.0806.4  NMV.0806.5  NMV.0806.6  NMV.0806.7  NMV.0806.8  NMV.0806.9 
+      54799       54363       19375       10595       14465       33582       35577        9167        4855 
+
+
+write.table(bac,file="bac.txt",quote=F,row.names=F,col.names=T,sep="\t");
+write.table(arc,file="arc.txt",quote=F,row.names=F,col.names=T,sep="\t");
+
+
+1.转化百分比
+bac_b<-bac;
+nn<-63;
+for (i in 1:(nn)) { m<-i+1;
+bac_b[,m]<-bac_b[,m]/sum(bac_b[,m])}
+
+
+
+1.all
+所有样品都有的Otu
+myfun<-function(x){sum(x!=0)}
+total<-bac_b[,2:(nn+1)];
+all_percent<-bac_b[(apply(total,1,myfun)>=nn),];
+
+write.table(all_percent,file="all_100_percent.txt",quote=F,row.names=F,col.names=T,sep="\t");
+作图
+library(gplots);
+bac_b_1<-all_percent;   #该一下名字及可
+bac_b_2<-bac_b_1[order(bac_b_1$genus),];
+bac_b_3<-bac_b_2[,2:(nn+1)];    #注意样品个数
+bac_b_2$haha<-paste(bac_b_2$Group,bac_b_2$genus,sep="_")
+bac_b_2$haha<-gsub("unclassified","un",bac_b_2$haha);
+bac_b_1_heat<-bac_b_3;
+row.names(bac_b_1_heat)<-bac_b_2$haha;
+ge_matrix <- data.matrix(bac_b_1_heat);
+tiff(filename="all_100_percent.tiff",width=18,height=6,units="cm",compression="lzw",bg="white",res=600); #生成文件名要改
+heatmap.2(ge_matrix,Rowv=NA,Colv=NA,dendrogram=('none'),distfun=dist, hclustfun=hclust,col=topo.colors(256),keysize=1.5,margins=c(5,10),density.info=c('none'),trace="none",vline=NA,hline=NA,cexRow=0.8,cexCol=0.8,offsetRow=-0.2,offsetCol=-0.2);
+dev.off();
+#图形不好就需要调整字体大小
+
+
+
+在正常的都有的
+mm<-46;
+zc<-bac_b[,2:(mm+1)];
+zc_100_percent<-bac_b[(apply(zc,1,myfun)>=mm),];
+
+write.table(zc_100_percent,file="healthy_100_percent.txt",quote=F,row.names=F,col.names=T,sep="\t");
+
+作图
+library(gplots);
+bac_b_1<-zc_100_percent;   #该一下名字及可
+bac_b_2<-bac_b_1[order(bac_b_1$genus),];
+bac_b_3<-bac_b_2[,2:47];    #注意样品个数
+bac_b_2$haha<-paste(bac_b_2$Group,bac_b_2$genus,sep="_");
+bac_b_2$haha<-gsub("unclassified","un",bac_b_2$haha);
+bac_b_1_heat<-bac_b_3;
+row.names(bac_b_1_heat)<-bac_b_2$haha;
+ge_matrix <- data.matrix(bac_b_1_heat);
+tiff(filename="zc_100_percent.tiff",width=18,height=6,units="cm",compression="lzw",bg="white",res=600); #生成文件名要改
+heatmap.2(ge_matrix,Rowv=NA,Colv=NA,dendrogram=('none'),distfun=dist, hclustfun=hclust,col=topo.colors(256),keysize=1.5,margins=c(5,10),density.info=c('none'),trace="none",vline=NA,hline=NA,cexRow=0.8,cexCol=0.8,offsetRow=-0.2,offsetCol=-0.2);
+dev.off();
+#图形不好就需要调整字体大小
+
+
+在生病中都有的otu
+sb<-bac_b[,(46+2):(nn+1)];
+sb_100_percent<-bac_b[(apply(sb,1,myfun)>=(nn-mm)),];
+
+write.table(sb_100_percent,file="patient_100_percent.txt",quote=F,row.names=F,col.names=T,sep="\t");
+
+library(gplots);
+bac_b_1<-sb_100_percent;   #该一下名字及可
+bac_b_2<-bac_b_1[order(bac_b_1$genus),];
+bac_b_3<-bac_b_2[,(46+2):(63+1)];    #注意样品个数
+bac_b_2$haha<-paste(bac_b_2$Group,bac_b_2$genus,sep="_");
+bac_b_2$haha<-gsub("unclassified","un",bac_b_2$haha);
+bac_b_1_heat<-bac_b_3;
+row.names(bac_b_1_heat)<-bac_b_2$haha;
+ge_matrix <- data.matrix(bac_b_1_heat);
+tiff(filename="sb_100_percent.tiff",width=18,height=6,units="cm",compression="lzw",bg="white",res=600); #生成文件名要改
+heatmap.2(ge_matrix,Rowv=NA,Colv=NA,dendrogram=('none'),distfun=dist, hclustfun=hclust,col=topo.colors(256),keysize=1.5,margins=c(5,10),density.info=c('none'),trace="none",vline=NA,hline=NA,cexRow=0.8,cexCol=0.8,offsetRow=-0.2,offsetCol=-0.2);
+dev.off();
+
+2.95percent
+aaaa<-0.95;
+total<-bac_b[,2:(nn+1)];
+mnn<-nn*aaaa;
+all_95_percent<-bac_b[(apply(total,1,myfun)>=mnn),];
+write.table(all_95_percent,file="all_95_percent.txt",quote=F,row.names=F,col.names=T,sep="\t");
+
+作图
+nn<-63;
+library(gplots);
+bac_b_1<-all_95_percent;   #该一下名字及可
+bac_b_2<-bac_b_1[order(bac_b_1$genus),];
+bac_b_3<-bac_b_2[,2:(nn+1)];    #注意样品个数
+bac_b_2$haha<-paste(bac_b_2$Group,bac_b_2$genus,sep="_")
+bac_b_2$haha<-gsub("unclassified","un",bac_b_2$haha);
+bac_b_1_heat<-bac_b_3;
+row.names(bac_b_1_heat)<-bac_b_2$haha;
+ge_matrix <- data.matrix(bac_b_1_heat);
+tiff(filename="all_95_percent.tiff",width=18,height=6,units="cm",compression="lzw",bg="white",res=600); #生成文件名要改
+heatmap.2(ge_matrix,Rowv=NA,Colv=NA,dendrogram=('none'),distfun=dist, hclustfun=hclust,col=topo.colors(256),keysize=1.5,margins=c(5,10),density.info=c('none'),trace="none",vline=NA,hline=NA,cexRow=0.8,cexCol=0.8,offsetRow=-0.2,offsetCol=-0.2);
+dev.off();
+#图形不好就需要调整字体大小
+
+
+3.80percent
+aaaa<-0.8;
+total<-bac_b[,2:(nn+1)];
+mnn<-nn*aaaa;
+myfun<-function(x){sum(x!=0)}
+all_80_percent<-bac_b[(apply(total,1,myfun)>=mnn),];
+write.table(all_80_percent,file="all_80_percent.txt",quote=F,row.names=F,col.names=T,sep="\t");
+
+有一个丰度超过1%
+myfun<-function(x){sum(x>0.01)};
+t80<-all_80_percent[,2:(nn+1)];
+all_80_percent_1<-all_80_percent[as.logical(apply(t80,1,myfun)),]
+write.table(all_80_percent_1,file="all_80_percent_1.txt",quote=F,row.names=F,col.names=T,sep="\t");
+
+nn<-63;
+library(gplots);
+bac_b_1<-all_80_percent_1;   #该一下名字及可
+bac_b_2<-bac_b_1[order(bac_b_1$genus),];
+bac_b_3<-bac_b_2[,2:(nn+1)];    #注意样品个数
+bac_b_2$haha<-paste(bac_b_2$Group,bac_b_2$genus,sep="_")
+bac_b_2$haha<-gsub("unclassified","un",bac_b_2$haha);
+bac_b_1_heat<-bac_b_3;
+row.names(bac_b_1_heat)<-bac_b_2$haha;
+ge_matrix <- data.matrix(bac_b_1_heat);
+tiff(filename="all_80_percent_1.tiff",width=18,height=6,units="cm",compression="lzw",bg="white",res=600); #生成文件名要改
+heatmap.2(ge_matrix,Rowv=NA,Colv=NA,dendrogram=('none'),distfun=dist, hclustfun=hclust,col=topo.colors(256),keysize=1.5,margins=c(5,10),density.info=c('none'),trace="none",vline=NA,hline=NA,cexRow=0.7,cexCol=0.8,offsetRow=-0.2,offsetCol=-0.2);
+dev.off();
+#图形不好就需要调整字体大小
+
+
+
+3.50percent
+aaaa<-0.5;
+total<-bac_b[,2:(nn+1)];
+mnn<-nn*aaaa;
+myfun<-function(x){sum(x!=0)}
+all_50_percent<-bac_b[(apply(total,1,myfun)>=mnn),];
+write.table(all_50_percent,file="all_50_percent.txt",quote=F,row.names=F,col.names=T,sep="\t");
+
+有一个丰度超过1%
+myfun<-function(x){sum(x>0.01)};
+t50<-all_50_percent[,2:(nn+1)];
+all_50_percent_1<-all_50_percent[as.logical(apply(t50,1,myfun)),]
+write.table(all_50_percent_1,file="all_50_percent_1.txt",quote=F,row.names=F,col.names=T,sep="\t");
+
+作图
+library(gplots);
+bac_b_1<-all_50_percent_1;   #该一下名字及可
+bac_b_2<-bac_b_1[order(bac_b_1$genus),];
+bac_b_3<-bac_b_2[,2:(nn+1)];    #注意样品个数
+bac_b_2$haha<-paste(bac_b_2$Group,bac_b_2$genus,sep="_");
+bac_b_2$haha<-gsub("unclassified","un",bac_b_2$haha);
+bac_b_1_heat<-bac_b_3;
+row.names(bac_b_1_heat)<-bac_b_2$haha;
+ge_matrix <- data.matrix(bac_b_1_heat);
+
+tiff(filename="all_50_percent_1.tiff",width=18,height=6,units="cm",compression="lzw",bg="white",res=600); #生成文件名要改
+
+heatmap.2(ge_matrix,Rowv=NA,Colv=NA,dendrogram=('none'),distfun=dist, hclustfun=hclust,col=topo.colors(256),keysize=1.5,margins=c(5,10),density.info=c('none'),trace="none",vline=NA,hline=NA,cexRow=0.8,cexCol=0.8,offsetRow=-0.2,offsetCol=-0.2);
+dev.off();
+#图形不好就需要调整字体大小
+
+
+#############################
+####在界门纲目科属种上的分类;###
+##############################
+setwd('/sam/meta/changdao/result');
+otu<-read.table('otu.txt',sep="\t",,header=T);
+
+mm<-46;
+nn<-63;
+
+#分古菌和细菌
+arc<-subset(otu,kindom=="Archaea");
+bac<-subset(otu,kindom=="Bacteria");
+write.table(bac,file="bac.txt",quote=F,row.names=F,col.names=T,sep="\t");
+write.table(arc,file="arc.txt",quote=F,row.names=F,col.names=T,sep="\t");
+
+
+bac_b<-bac;
+for (i in 1:(nn)) { m<-i+1;
+bac_b[,m]<-bac_b[,m]/sum(bac_b[,m])}
+
+#分正常的和生病的
+zc<-bac_b[,c(1,2:(mm+1),(nn+3):(nn+8))];
+sb<-bac_b[,c(1,(mm+2):(nn+1),(nn+3):(nn+8))];
+
+write.table(zc,file="healthy_bac.txt",quote=F,row.names=F,col.names=T,sep="\t");
+write.table(sb,file="patient_bac.txt",quote=F,row.names=F,col.names=T,sep="\t");
+
+
+setwd('/sam/meta/changdao/result/result')
+#正常的
+#界
+library(reshape2);
+library(ggplot2);
+library(grid);
+library(plyr);
+library(RColorBrewer);
+
+zc_kindom<-zc[,c(2:(mm+1),(mm+2))];  #这里需要修改
+aa<-zc_kindom;
+md<-melt(aa,id="kindom");
+ab<-dcast(md,kindom~variable,sum);
+
+#门
+zc_phylum<-zc[,c(2:(mm+1),(mm+3))];  #这里需要修改
+aa<-zc_phylum;            #改
+md<-melt(aa,id="phylum");  #改
+ab<-dcast(md,phylum~variable,sum);#改
+aaa<-melt(ab,id.vars="phylum",value.name="value",variable.name="bq");#改
+
+colnames(aaa)<-c("name","bq","value");
+eee<-aaa;
+newpalette<-colorRampPalette(brewer.pal(12,"Set3"))(length(unique(eee$name)));
+
+tiff(filename="health_phylum.tiff",width=20,height=15,units="cm",compression="lzw",bg="white",res=600);#改名字
+ggplot(eee,aes(bq,weight=value,fill=name))+geom_bar(position="stack",aes(order=desc(name)))+theme(legend.title=element_blank())+ylab("丰度")+xlab("样品")+scale_fill_manual(values=newpalette)+theme(panel.background=element_rect(fill=NA,colour="grey"),axis.text.x=element_text(angle=90,size=8),axis.title.x=element_text(size=20),axis.title.y=element_text(size=20));
+dev.off();
+write.table(ab,file="health_phylum",quote=F,row.names=F,col.names=T,sep="\t")  #改名
+
+#纲
+zc_class<-zc[,c(2:(mm+1),(mm+4))];  #这里需要修改
+aa<-zc_class;            #改
+md<-melt(aa,id="class");  #改
+ab<-dcast(md,class~variable,sum);#改
+aaa<-melt(ab,id.vars="class",value.name="value",variable.name="bq");#改
+
+colnames(aaa)<-c("name","bq","value");
+eee<-aaa;
+newpalette<-colorRampPalette(brewer.pal(12,"Set3"))(length(unique(eee$name)));
+
+tiff(filename="health_class.tiff",width=20,height=17,units="cm",compression="lzw",bg="white",res=600);#改名字
+ggplot(eee,aes(bq,weight=value,fill=name))+geom_bar(position="stack",aes(order=desc(name)))+theme(legend.title=element_blank())+ylab("丰度")+xlab("样品")+scale_fill_manual(values=newpalette)+theme(panel.background=element_rect(fill=NA,colour="grey"),axis.text.x=element_text(angle=90,size=8),axis.title.x=element_text(size=20),axis.title.y=element_text(size=20));
+dev.off();
+
+write.table(ab,file="health_class",quote=F,row.names=F,col.names=T,sep="\t")  #改名
+
+#目水平(作图只显示在某个度度于于0.01的目)
+zc_order<-zc[,c(2:(mm+1),(mm+5))];  #这里需要修改
+aa<-zc_order;            #改
+md<-melt(aa,id="order");  #改
+ab<-dcast(md,order~variable,sum);#改
+
+myfun<-function(x){sum(x>0.01)};
+bbb<-ab[,2:(mm+1)];
+aaa_1<-ab[as.logical(apply(bbb,1,myfun)),]
+aaa<-melt(aaa_1,id.vars="order",value.name="value",variable.name="bq");#改
+
+colnames(aaa)<-c("name","bq","value");
+
+eee<-aaa;
+newpalette<-colorRampPalette(brewer.pal(12,"Set3"))(length(unique(eee$name)));
+
+tiff(filename="health_order.tiff",width=20,height=17,units="cm",compression="lzw",bg="white",res=600);#改名字
+ggplot(eee,aes(bq,weight=value,fill=name))+geom_bar(position="stack",aes(order=desc(name)))+theme(legend.title=element_blank())+ylab("丰度")+xlab("样品")+scale_fill_manual(values=newpalette)+theme(panel.background=element_rect(fill=NA,colour="grey"),axis.text.x=element_text(angle=90,size=8),axis.title.x=element_text(size=20),axis.title.y=element_text(size=20));
+dev.off();
+
+write.table(ab,file="health_order",quote=F,row.names=F,col.names=T,sep="\t")  #改名
+
+#科水平(作图只显示在某个度度于于0.01的目)
+zc_family<-zc[,c(2:(mm+1),(mm+6))];  #这里需要修改
+aa<-zc_family;            #改
+md<-melt(aa,id="family");  #改
+ab<-dcast(md,family~variable,sum);#改
+
+myfun<-function(x){sum(x>0.01)};
+bbb<-ab[,2:(mm+1)];
+aaa_1<-ab[as.logical(apply(bbb,1,myfun)),]
+aaa<-melt(aaa_1,id.vars="family",value.name="value",variable.name="bq");#改
+
+colnames(aaa)<-c("name","bq","value");
+
+eee<-aaa;
+newpalette<-colorRampPalette(brewer.pal(12,"Set3"))(length(unique(eee$name)));
+
+tiff(filename="health_family.tiff",width=20,height=17,units="cm",compression="lzw",bg="white",res=600);#改名字
+ggplot(eee,aes(bq,weight=value,fill=name))+geom_bar(position="stack",aes(order=desc(name)))+theme(legend.title=element_blank())+ylab("丰度")+xlab("样品")+scale_fill_manual(values=newpalette)+theme(panel.background=element_rect(fill=NA,colour="grey"),axis.text.x=element_text(angle=90,size=8),axis.title.x=element_text(size=20),axis.title.y=element_text(size=20));
+dev.off();
+
+write.table(ab,file="health_family",quote=F,row.names=F,col.names=T,sep="\t")  #改名
+
+#属水平(作图只显示在某个度度于于0.01的目)
+zc_genus<-zc[,c(2:(mm+1),(mm+7))];  #这里需要修改
+aa<-zc_genus;            #改
+md<-melt(aa,id="genus");  #改
+ab<-dcast(md,genus~variable,sum);#改
+
+myfun<-function(x){sum(x>0.01)};
+bbb<-ab[,2:(mm+1)];
+aaa_1<-ab[as.logical(apply(bbb,1,myfun)),]
+aaa<-melt(aaa_1,id.vars="genus",value.name="value",variable.name="bq");#改
+
+colnames(aaa)<-c("name","bq","value");
+
+eee<-aaa;
+newpalette<-colorRampPalette(brewer.pal(12,"Set3"))(length(unique(eee$name)));
+
+tiff(filename="health_genus.tiff",width=25,height=22,units="cm",compression="lzw",bg="white",res=600);#改名字
+ggplot(eee,aes(bq,weight=value,fill=name))+geom_bar(position="stack",aes(order=desc(name)))+theme(legend.title=element_blank())+ylab("丰度")+xlab("样品")+scale_fill_manual(values=newpalette)+theme(panel.background=element_rect(fill=NA,colour="grey"),axis.text.x=element_text(angle=90,size=8),axis.title.x=element_text(size=20),axis.title.y=element_text(size=20));
+dev.off();
+
+write.table(ab,file="health_genus",quote=F,row.names=F,col.names=T,sep="\t")  #改名
+
+#otu水平####
+有一个丰度超过7%
+myfun<-function(x){sum(x>0.07)};
+bbb<-zc[,2:(mm+1)];
+all_50_percent_1<-zc[as.logical(apply(bbb,1,myfun)),];
+
+write.table(all_50_percent_1,file="healthy_percent_7.txt",quote=F,row.names=F,col.names=T,sep="\t");
+
+作图
+library(gplots);
+bac_b_1<-all_50_percent_1;   #该一下名字及可
+bac_b_2<-bac_b_1[order(bac_b_1$genus),];
+bac_b_3<-bac_b_2[,2:(mm+1)];    #注意样品个数
+bac_b_2$haha<-paste(bac_b_2$Group,bac_b_2$genus,sep="_");
+bac_b_2$haha<-gsub("unclassified","un",bac_b_2$haha);
+bac_b_1_heat<-bac_b_3;
+row.names(bac_b_1_heat)<-bac_b_2$haha;
+ge_matrix <- data.matrix(bac_b_1_heat);
+
+tiff(filename="healthy_percent_7.tiff",width=24,height=15,units="cm",compression="lzw",bg="white",res=600); #生成文件名要改
+heatmap.2(ge_matrix,Rowv=NA,Colv=NA,dendrogram=('none'),distfun=dist, hclustfun=hclust,col=topo.colors(256),keysize=1.5,margins=c(5,10),density.info=c('none'),trace="none",vline=NA,hline=NA,cexRow=0.8,cexCol=0.8,offsetRow=-0.2,offsetCol=-0.2);
+dev.off();
+#图形不好就需要调整字体大小
+
+
+
+#####生病#####3
+#分正常的和生病的(生病还没弄)
+
+
+mm<-17;
+#门
+zc_phylum<-zc[,c(2:(mm+1),(mm+3))];  #这里需要修改
+aa<-zc_phylum;            #改
+md<-melt(aa,id="phylum");  #改
+ab<-dcast(md,phylum~variable,sum);#改
+aaa<-melt(ab,id.vars="phylum",value.name="value",variable.name="bq");#改
+
+colnames(aaa)<-c("name","bq","value");
+eee<-aaa;
+newpalette<-colorRampPalette(brewer.pal(12,"Set3"))(length(unique(eee$name)));
+
+tiff(filename="health_phylum.tiff",width=20,height=15,units="cm",compression="lzw",bg="white",res=600);#改名字
+ggplot(eee,aes(bq,weight=value,fill=name))+geom_bar(position="stack",aes(order=desc(name)))+theme(legend.title=element_blank())+ylab("丰度")+xlab("样品")+scale_fill_manual(values=newpalette)+theme(panel.background=element_rect(fill=NA,colour="grey"),axis.text.x=element_text(angle=90,size=8),axis.title.x=element_text(size=20),axis.title.y=element_text(size=20));
+dev.off();
+write.table(ab,file="health_phylum",quote=F,row.names=F,col.names=T,sep="\t")  #改名
+
+#纲
+zc_class<-zc[,c(2:(mm+1),(mm+4))];  #这里需要修改
+aa<-zc_class;            #改
+md<-melt(aa,id="class");  #改
+ab<-dcast(md,class~variable,sum);#改
+aaa<-melt(ab,id.vars="class",value.name="value",variable.name="bq");#改
+
+colnames(aaa)<-c("name","bq","value");
+eee<-aaa;
+newpalette<-colorRampPalette(brewer.pal(12,"Set3"))(length(unique(eee$name)));
+
+tiff(filename="health_class.tiff",width=20,height=17,units="cm",compression="lzw",bg="white",res=600);#改名字
+ggplot(eee,aes(bq,weight=value,fill=name))+geom_bar(position="stack",aes(order=desc(name)))+theme(legend.title=element_blank())+ylab("丰度")+xlab("样品")+scale_fill_manual(values=newpalette)+theme(panel.background=element_rect(fill=NA,colour="grey"),axis.text.x=element_text(angle=90,size=8),axis.title.x=element_text(size=20),axis.title.y=element_text(size=20));
+dev.off();
+
+write.table(ab,file="health_class",quote=F,row.names=F,col.names=T,sep="\t")  #改名
+
+#目水平(作图只显示在某个度度于于0.01的目)
+zc_order<-zc[,c(2:(mm+1),(mm+5))];  #这里需要修改
+aa<-zc_order;            #改
+md<-melt(aa,id="order");  #改
+ab<-dcast(md,order~variable,sum);#改
+
+myfun<-function(x){sum(x>0.01)};
+bbb<-ab[,2:(mm+1)];
+aaa_1<-ab[as.logical(apply(bbb,1,myfun)),]
+aaa<-melt(aaa_1,id.vars="order",value.name="value",variable.name="bq");#改
+
+colnames(aaa)<-c("name","bq","value");
+
+eee<-aaa;
+newpalette<-colorRampPalette(brewer.pal(12,"Set3"))(length(unique(eee$name)));
+
+tiff(filename="health_order.tiff",width=20,height=17,units="cm",compression="lzw",bg="white",res=600);#改名字
+ggplot(eee,aes(bq,weight=value,fill=name))+geom_bar(position="stack",aes(order=desc(name)))+theme(legend.title=element_blank())+ylab("丰度")+xlab("样品")+scale_fill_manual(values=newpalette)+theme(panel.background=element_rect(fill=NA,colour="grey"),axis.text.x=element_text(angle=90,size=8),axis.title.x=element_text(size=20),axis.title.y=element_text(size=20));
+dev.off();
+
+write.table(ab,file="health_order",quote=F,row.names=F,col.names=T,sep="\t")  #改名
+
+#科水平(作图只显示在某个度度于于0.01的目)
+zc_family<-zc[,c(2:(mm+1),(mm+6))];  #这里需要修改
+aa<-zc_family;            #改
+md<-melt(aa,id="family");  #改
+ab<-dcast(md,family~variable,sum);#改
+
+myfun<-function(x){sum(x>0.01)};
+bbb<-ab[,2:(mm+1)];
+aaa_1<-ab[as.logical(apply(bbb,1,myfun)),]
+aaa<-melt(aaa_1,id.vars="family",value.name="value",variable.name="bq");#改
+
+colnames(aaa)<-c("name","bq","value");
+
+eee<-aaa;
+newpalette<-colorRampPalette(brewer.pal(12,"Set3"))(length(unique(eee$name)));
+
+tiff(filename="health_family.tiff",width=20,height=17,units="cm",compression="lzw",bg="white",res=600);#改名字
+ggplot(eee,aes(bq,weight=value,fill=name))+geom_bar(position="stack",aes(order=desc(name)))+theme(legend.title=element_blank())+ylab("丰度")+xlab("样品")+scale_fill_manual(values=newpalette)+theme(panel.background=element_rect(fill=NA,colour="grey"),axis.text.x=element_text(angle=90,size=8),axis.title.x=element_text(size=20),axis.title.y=element_text(size=20));
+dev.off();
+
+write.table(ab,file="health_family",quote=F,row.names=F,col.names=T,sep="\t")  #改名
+
+#属水平(作图只显示在某个度度于于0.01的目)
+zc_genus<-zc[,c(2:(mm+1),(mm+7))];  #这里需要修改
+aa<-zc_genus;            #改
+md<-melt(aa,id="genus");  #改
+ab<-dcast(md,genus~variable,sum);#改
+
+myfun<-function(x){sum(x>0.01)};
+bbb<-ab[,2:(mm+1)];
+aaa_1<-ab[as.logical(apply(bbb,1,myfun)),]
+aaa<-melt(aaa_1,id.vars="genus",value.name="value",variable.name="bq");#改
+
+colnames(aaa)<-c("name","bq","value");
+
+eee<-aaa;
+newpalette<-colorRampPalette(brewer.pal(12,"Set3"))(length(unique(eee$name)));
+
+tiff(filename="health_genus.tiff",width=25,height=22,units="cm",compression="lzw",bg="white",res=600);#改名字
+ggplot(eee,aes(bq,weight=value,fill=name))+geom_bar(position="stack",aes(order=desc(name)))+theme(legend.title=element_blank())+ylab("丰度")+xlab("样品")+scale_fill_manual(values=newpalette)+theme(panel.background=element_rect(fill=NA,colour="grey"),axis.text.x=element_text(angle=90,size=8),axis.title.x=element_text(size=20),axis.title.y=element_text(size=20));
+dev.off();
+
+write.table(ab,file="health_genus",quote=F,row.names=F,col.names=T,sep="\t")  #改名
+
+
+
+
+
+
+
+#####送出去
+mv bb.filter.unique.precluster.pick.pick.fasta ./send;
+mv bb.filter.unique.precluster.uchime.pick.pick.count_table ./send;
+mv bb.filter.unique.precluster.pick.nr_v119.wang.pick.taxonomy ./send;
+
+cluster.split(fasta=bb.filter.unique.precluster.pick.pick.fasta, count=bb.filter.unique.precluster.uchime.pick.pick.count_table,taxonomy=bb.filter.unique.precluster.pick.nr_v119.wang.pick.taxonomy,splitmethod=classify, taxlevel=5, cutoff=0.08)
+
+mothur > make.shared(list=bb.filter.unique.precluster.pick.pick.an.unique_list.list, count=bb.filter.unique.precluster.uchime.pick.pick.count_table, label=0.03)
+
+mothur > classify.otu(list=bb.filter.unique.precluster.pick.pick.an.unique_list.list, count=bb.filter.unique.precluster.uchime.pick.pick.count_table, taxonomy=bb.filter.unique.precluster.pick.pds.wang.pick.taxonomy, label=0.03)
+
+mothur > summary.single(shared=bb.filter.unique.precluster.pick.pick.an.unique_list.shared, calc=sobs-ace-chao-shannon-coverage);
+###bb.filter.unique.precluster.pick.pick.an.unique_list.groups.summary ---- alpha  analysis
+
+mothur > get.oturep(column=bb.filter.unique.precluster.pick.pick.dist, count=bb.filter.unique.precluster.uchime.pick.pick.count_table,  fasta=bb.filter.unique.precluster.pick.pick.fasta, list=bb.filter.unique.precluster.pick.pick.an.unique_list.list,label=0.03)
+
+########
+??
+mothur > make.shared(list=bb.filter.unique.precluster.pick.pick.an.unique_list.list, count=bb.filter.unique.precluster.uchime.pick.pick.count_table, label=0.03)
+
+mothur > classify.otu(list=bb.filter.unique.precluster.pick.pick.an.unique_list.list, count=bb.filter.unique.precluster.uchime.pick.pick.count_table, taxonomy=bb.filter.unique.precluster.pick.pds.wang.pick.taxonomy, label=0.03)
+
+##bb.filter.unique.precluster.pick.pick.an.unique_list.0.03.cons.taxonomy  ----otu_rank
+##bb.filter.unique.precluster.pick.pick.an.unique_list.shared -- otu_number
+
+
+mothur > summary.single(shared=bb.filter.unique.precluster.pick.pick.an.unique_list.shared, calc=sobs-ace-chao-shannon-coverage);
+###bb.filter.unique.precluster.pick.pick.an.unique_list.groups.summary ---- alpha  analysis
+
+mothur > get.oturep(column=bb.filter.unique.precluster.pick.pick.dist, count=bb.filter.unique.precluster.uchime.pick.pick.count_table,  fasta=bb.filter.unique.precluster.pick.pick.fasta, list=bb.filter.unique.precluster.pick.pick.an.unique_list.list,label=0.03)
+
+Output File Names: 
+bb.filter.unique.precluster.pick.pick.an.unique_list.0.03.rep.count_table
+bb.filter.unique.precluster.pick.pick.an.unique_list.0.03.rep.fasta   -- represent sequence
+
+wc bb.filter.unique.precluster.pick.pick.an.unique_list.0.03.rep.count_table
+ 4353  34824 259241 bb.filter.unique.precluster.pick.pick.an.unique_list.0.03.rep.count_table
+ 4353  13059 557236 bb.ilter.unique.precluster.pick.pick.an.unique_list.0.03.cons.taxonomy
+
+
+$ ./mothur "#filter.seqs(fasta=current, vertical=T, trump=.); pre.cluster(fasta=current, count=current, diffs=2); unique.seqs(fasta=current, count=current); pre.cluster(fasta=current, count=current, diffs=2); chimera.uchime(fasta=current, count=current, dereplicate=t); remove.seqs(fasta=current, accnos=current); classify.seqs(fasta=current, count=current, reference=trainset9_032012.pds.fasta, taxonomy=trainset9_032012.pds.tax, cutoff=80); remove.lineage(fasta=current, count=current, taxonomy=current, taxon=Chloroplast-Mitochondria-unknown-Archaea-Eukaryota); remove.groups(count=current, fasta=current, taxonomy=current, groups=Mock); cluster.split(fasta=current, count=current, taxonomy=current, splitmethod=classify, taxlevel=4, cutoff=0.15); make.shared(list=current, count=current, label=0.03); classify.otu(list=current, count=current, taxonomy=current, label=0.03); phylotype(taxonomy=current); make.shared(list=current, count=current, label=1); classify.otu(list=current, count=current, taxonomy=current, label=1);"
+
+$ ./mothur "#make.contigs(file=stability.files, processors=8); screen.seqs(fasta=current, maxambig=0, maxlength=275); unique.seqs(); count.seqs(name=current, group=current); align.seqs(fasta=current, reference=silva.v4.fasta); screen.seqs(fasta=current, count=current, start=1968, end=11550, maxhomop=8); filter.seqs(fasta=current, vertical=T, trump=.); pre.cluster(fasta=current, count=current, diffs=2); unique.seqs(fasta=current, count=current); pre.cluster(fasta=current, count=current, diffs=2); chimera.uchime(fasta=current, count=current, dereplicate=t); remove.seqs(fasta=current, accnos=current); classify.seqs(fasta=current, count=current, reference=trainset9_032012.pds.fasta, taxonomy=trainset9_032012.pds.tax, cutoff=80); remove.lineage(fasta=current, count=current, taxonomy=current, taxon=Chloroplast-Mitochondria-unknown-Archaea-Eukaryota); remove.groups(count=current, fasta=current, taxonomy=current, groups=Mock); cluster.split(fasta=current, count=current, taxonomy=current, splitmethod=classify, taxlevel=4, cutoff=0.15); make.shared(list=current, count=current, label=0.03); classify.otu(list=current, count=current, taxonomy=current, label=0.03); phylotype(taxonomy=current); make.shared(list=current, count=current, label=1); classify.otu(list=current, count=current, taxonomy=current, label=1);"
